@@ -1,5 +1,5 @@
 import React from 'react'
-import Link from 'next/link'
+import { Link } from 'react-router-dom'
 
 export default function Footer() {
   return (
@@ -9,7 +9,7 @@ export default function Footer() {
           <div>© {new Date().getFullYear()} Excellence Property Agencies</div>
           <div className="text-right">
             <div className="font-semibold text-gray-900">
-              Agent: <Link href="/upload" className="hover:text-blue-600 transition-colors">Modupe Femi-Asoro</Link>
+              Agent: <Link to="/upload" className="hover:text-blue-600 transition-colors">Modupe Femi-Asoro</Link>
             </div>
             <div className="text-gray-500">Call or message for one-on-one support</div>
           </div>
