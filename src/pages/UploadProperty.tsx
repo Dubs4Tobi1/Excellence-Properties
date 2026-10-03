@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import { mediaBucket, uploadMedia, validateMedia } from '../lib/mediaUpload'
 
 const categories = [
   'Houses & Apartments for Sale',
@@ -188,25 +189,7 @@ const areaOptions = [
   'Onikan',
 ]
 
-const bucketName = 'property-images'
-
-const parseNumber = (value: string) => {
-  const trimmed = value.trim()
-  return trimmed ? Number(trimmed) : null
-}
-
-const sanitizeFileName = (name: string) => {
-  return name
-    .trim()
-    .replace(/\s+/g, '-')
-    .replace(/[^a-zA-Z0-9-_.]/g, '-')
-    .replace(/-+/g, '-')
-}
-
-const getPublicUrl = (path: string) => {
-  const { data } = supabase.storage.from(bucketName).getPublicUrl(path)
-  return data?.publicUrl || ''
-}
+const parseNumber = (value: string) => value.trim() ? Number(value) : null
 
 export default function UploadProperty() {
   const [category, setCategory] = useState('')
@@ -229,6 +212,11 @@ export default function UploadProperty() {
   const [video, setVideo] = useState<FileList | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [published, setPublished] = useState(false)
+  const [progress, setProgress] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [signingIn, setSigningIn] = useState(false)
   const navigate = useNavigate()
 
   const counts = Array.from({ length: 11 }, (_, index) => index.toString())
@@ -240,25 +228,11 @@ export default function UploadProperty() {
     )
   }
 
-  const uploadFile = async (file: File, propertyId: string) => {
-    const safeName = sanitizeFileName(file.name)
-    const path = `properties/${propertyId}/${Date.now()}-${safeName}`
-    const { error: uploadError } = await supabase.storage.from(bucketName).upload(path, file, {
-      cacheControl: '3600',
-      upsert: false,
-    })
-
-    if (uploadError) {
-      throw uploadError
-    }
-
-    return getPublicUrl(path)
-  }
-
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
-    if (!category || !propertyType || !title || !price || !area || !locality) {
+    if (isSubmitting || published) return
+    if (!category || !propertyType || !title.trim() || !Number.isFinite(Number(price)) || Number(price) <= 0 || !area || !locality.trim()) {
       setMessage('Please fill in all required fields before publishing.')
       return
     }
@@ -266,9 +240,32 @@ export default function UploadProperty() {
     setIsSubmitting(true)
     setMessage(null)
 
+    const propertyId = crypto.randomUUID()
+    const uploadedPaths: string[] = []
+    let recordCreated = false
     try {
+      const { data, error } = await supabase.auth.getUser()
+      if (error || !data.user) throw new Error('Sign in with your agent account before publishing.')
+      if (data.user.app_metadata?.role !== 'agent') throw new Error('Your account needs agent access before publishing. Contact the site administrator.')
+      const photoFiles = Array.from(photos || [])
+      if (photoFiles.length > 20) throw new Error('Choose up to 20 photos.')
+      photoFiles.forEach(file => validateMedia(file, 'image'))
+      if (video?.[0]) validateMedia(video[0], 'video')
+      if (size && (!Number.isInteger(Number(size)) || Number(size) < 0)) throw new Error('Enter a whole number of square metres.')
+      const files = [...photoFiles, ...Array.from(video || [])]
+      const urls: string[] = []
+      for (const [index, file] of files.entries()) {
+        const path = `properties/${data.user.id}/${propertyId}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '-')}`
+        uploadedPaths.push(path)
+        urls.push(await uploadMedia(file, path, percent => setProgress(`Uploading ${index + 1} of ${files.length}: ${percent}%`)))
+      }
+      setProgress('Saving property details…')
       const propertyPayload = {
-        title,
+        id: propertyId,
+        owner_id: data.user.id,
+        image_url: urls[0] && photoFiles.length ? urls[0] : null,
+        video_url: video?.length ? urls[photoFiles.length] : null,
+        title: title.trim(),
         description,
         price: Number(price),
         category,
@@ -297,50 +294,54 @@ export default function UploadProperty() {
         throw insertError || new Error('Unable to create property record.')
       }
 
-      const propertyId = insertData.id
-      let primaryImageUrl = ''
-      let uploadedVideoUrl = ''
-
-      if (photos?.length) {
-        const files = Array.from(photos)
-        const photoUrls = await Promise.all(files.map((file) => uploadFile(file, propertyId)))
-
-        primaryImageUrl = photoUrls[0] || ''
-
-        await supabase.from('property_images').insert(
-          photoUrls.map((url, index) => ({
-            property_id: propertyId,
-            url,
-            is_primary: index === 0,
-          }))
+      recordCreated = true
+      if (photoFiles.length) {
+        const { error } = await supabase.from('property_images').insert(
+          urls.slice(0, photoFiles.length).map((url, index) => ({ property_id: propertyId, url, is_primary: index === 0 }))
         )
+        if (error) throw error
       }
 
-      if (video?.length) {
-        uploadedVideoUrl = await uploadFile(video[0], propertyId)
-      }
-
-      if (primaryImageUrl || uploadedVideoUrl) {
-        const updatePayload: any = {}
-        if (primaryImageUrl) updatePayload.image_url = primaryImageUrl
-        if (uploadedVideoUrl) updatePayload.video_url = uploadedVideoUrl
-
-        await supabase.from('properties').update(updatePayload).eq('id', propertyId)
-      }
-
+      setPublished(true)
       setMessage('Listing published successfully! Redirecting to My Listings...')
       setTimeout(() => navigate('/my-listings'), 1200)
     } catch (uploadError: any) {
-      setMessage(uploadError?.message || 'Unable to publish listing. Please try again.')
+      let cleanupFailed = false
+      if (recordCreated) {
+        const { data, error } = await supabase.from('properties').delete().eq('id', propertyId).select('id')
+        cleanupFailed = Boolean(error) || !data?.length
+      }
+      if (uploadedPaths.length && !cleanupFailed) {
+        const { error } = await supabase.storage.from(mediaBucket).remove(uploadedPaths)
+        cleanupFailed = Boolean(error)
+      }
+      setMessage(`${uploadError?.message || 'Unable to publish listing.'}${cleanupFailed ? ` Cleanup needs attention; reference: ${propertyId}.` : ' Please try again.'}`)
     } finally {
+      setProgress('')
       setIsSubmitting(false)
     }
   }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-12">
-      <h2 className="text-3xl font-semibold mb-6">Upload Property</h2>
+      <p className="text-sm uppercase tracking-widest text-primary mb-2">Agent workspace</p>
+      <h2 className="text-3xl font-semibold mb-3">Create your property listing</h2>
+      <p className="mb-6 text-gray-600">Add the details, photos and a video tour. Keep this page open while your files upload.</p>
+      <form className="mb-8 rounded-3xl border bg-white p-6 flex flex-wrap gap-3" onSubmit={async e => {
+        e.preventDefault(); setSigningIn(true)
+        try {
+          const { error } = await supabase.auth.signInWithPassword({ email, password })
+          setMessage(error ? error.message : 'Signed in. You can now publish your listing.')
+          if (!error) setPassword('')
+        } catch { setMessage('Unable to sign in. Check your connection and try again.') }
+        finally { setSigningIn(false) }
+      }}>
+        <input aria-label="Agent email" type="email" required autoComplete="username" placeholder="Agent email" value={email} onChange={e => setEmail(e.target.value)} className="border rounded-xl p-3" />
+        <input aria-label="Password" type="password" required autoComplete="current-password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} className="border rounded-xl p-3" />
+        <button disabled={signingIn || isSubmitting} className="rounded-xl bg-gray-900 text-white px-5 py-3">{signingIn ? 'Signing in…' : 'Agent sign in'}</button>
+      </form>
       <form className="space-y-8" onSubmit={handleSubmit}>
+        <fieldset disabled={isSubmitting || published} className="space-y-8">
         {message && (
           <div className="rounded-3xl bg-yellow-50 border border-yellow-200 p-4 text-sm text-yellow-700">
             {message}
@@ -531,7 +532,7 @@ export default function UploadProperty() {
             <h3 className="text-xl font-semibold mb-4">9. Photos</h3>
             <input
               type="file"
-              accept="image/*"
+              accept="image/jpeg,image/png,image/webp"
               multiple
               onChange={(e) => setPhotos(e.target.files)}
               className="w-full rounded-3xl border border-gray-300 p-3 text-sm"
@@ -542,20 +543,21 @@ export default function UploadProperty() {
             <h3 className="text-xl font-semibold mb-4">10. Videos (if available)</h3>
             <input
               type="file"
-              accept="video/*"
+              accept="video/mp4,video/webm"
               onChange={(e) => setVideo(e.target.files)}
               className="w-full rounded-3xl border border-gray-300 p-3 text-sm"
             />
-            <p className="mt-2 text-sm text-gray-500">Upload or attach a video tour if available.</p>
+            <p className="mt-2 text-sm text-gray-500">MP4 or WebM, up to 50 MB. Large files upload in chunks with automatic retries.</p>
           </div>
         </section>
 
         <div className="flex flex-wrap gap-3">
-          <button type="submit" disabled={isSubmitting} className="rounded-3xl bg-primary px-6 py-3 text-white disabled:opacity-60">
+          <button type="submit" disabled={isSubmitting || published} className="rounded-3xl bg-primary px-6 py-3 text-white disabled:opacity-60">
             {isSubmitting ? 'Publishing…' : 'Publish Listing'}
           </button>
-          <button type="button" className="rounded-3xl border border-gray-300 px-6 py-3">Save Draft</button>
+          <p role="status" aria-live="polite" className="self-center text-sm text-gray-600">{progress}</p>
         </div>
+        </fieldset>
       </form>
     </div>
   )
