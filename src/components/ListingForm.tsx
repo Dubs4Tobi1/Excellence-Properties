@@ -34,7 +34,7 @@ export default function ListingForm({ onSuccess }: { onSuccess?: (row: any) => v
 
     const { data, error: insertErr } = await supabase
       .from('listings')
-      .insert([payload]);
+      .insert([payload]).select().single();
 
     setLoading(false);
 
@@ -44,7 +44,7 @@ export default function ListingForm({ onSuccess }: { onSuccess?: (row: any) => v
       return;
     }
 
-    if (onSuccess) onSuccess(data?.[0]);
+    if (onSuccess) onSuccess(data);
     // reset basic fields (optional)
     setTitle('');
     setDescription('');

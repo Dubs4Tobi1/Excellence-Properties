@@ -10,21 +10,22 @@ export default function Navbar() {
   const height = useTransform(scrollY, [0, 100], [96, 64])
 
   return (
-    <motion.header style={{ height }} className="sticky top-0 z-40 bg-white/60 backdrop-blur glass drop-shadow-md">
+    <motion.header style={{ height }} className="sticky top-0 z-40 bg-white/95 backdrop-blur glass drop-shadow-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-full py-3">
           <div className="flex items-center gap-4 h-full">
-            <Link to="/" className="h-20 w-36 sm:w-48 bg-white rounded-xl flex items-center justify-center overflow-hidden p-2">
+            <Link to="/" className="h-12 w-36 sm:w-48 bg-white rounded-xl flex items-center justify-center overflow-hidden p-2">
               <img src={logo} alt="Logo" className="w-full h-full object-contain" />
             </Link>
             <nav className="hidden md:flex gap-4">
               <Link to="/" className="text-sm font-medium">Home</Link>
-              <Link to="/my-listings" className="text-sm">My Listings</Link>
+              <Link to="/my-listings" className="text-sm">Properties</Link>
               <Link to="/zylus-homes" className="text-sm">Zylus Homes</Link>
               <Link to="/blue-earth-properties" className="text-sm">Blue Earth Properties</Link>
             </nav>
           </div>
           <div className="flex items-center gap-3">
+            <Link to="/upload" className="rounded-full bg-gray-900 px-4 py-2 text-sm text-white">List property</Link>
             <button
               type="button"
               aria-label="Toggle menu"
@@ -51,7 +52,7 @@ export default function Navbar() {
               className="block rounded-xl px-4 py-3 text-base text-gray-700 hover:bg-gray-100"
               onClick={() => setShowMobileMenu(false)}
             >
-              My Listings
+              Properties
             </Link>
             <Link
               to="/zylus-homes"

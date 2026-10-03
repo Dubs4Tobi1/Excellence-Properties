@@ -93,6 +93,16 @@ export default function PropertyDetails() {
             </div>
           </div>
 
+          {property.video_url && (
+            <section className="rounded-3xl bg-white p-6 shadow-sm">
+              <h2 className="text-lg font-semibold mb-4">Take a video tour</h2>
+              <video key={property.video_url} controls playsInline preload="metadata" poster={property.image_url || undefined} className="w-full rounded-2xl bg-gray-900 max-h-[500px]">
+                <source src={property.video_url} />
+              </video>
+              <a href={property.video_url} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm text-primary underline">Open video separately if playback is unavailable</a>
+            </section>
+          )}
+
           <section className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-3xl bg-white p-6 shadow-sm">
               <h3 className="font-semibold text-lg mb-3">Overview</h3>
@@ -102,11 +112,7 @@ export default function PropertyDetails() {
                 <div><strong>Furnishing:</strong> {property.furnishing || 'N/A'}</div>
                 <div><strong>Condition:</strong> {property.condition || 'N/A'}</div>
                 <div><strong>Agent:</strong> {property.agent_name || 'Modupe Femi-Asoro'}</div>
-                {property.video_url && (
-                  <a href={property.video_url} target="_blank" rel="noreferrer" className="inline-block rounded-full border border-primary px-4 py-2 text-primary text-sm hover:bg-primary/5">
-                    Watch property video
-                  </a>
-                )}
+
               </div>
             </div>
 
